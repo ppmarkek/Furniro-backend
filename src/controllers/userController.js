@@ -131,43 +131,75 @@ export const updateUserData = async (req, res) => {
       password,
       companyName,
       address,
+      oldPassword,
     } = req.body;
 
-    // Validate required fields
+    // Проверяем наличие userId
     if (!userId) {
       return res.status(400).json({ message: "User ID is required." });
     }
 
-    // Prepare the fields to update
+    // Находим пользователя в базе
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    // Подготавливаем поля для обновления
     const updateFields = {
       firstName,
       lastName,
-      email,
       phone,
       companyName,
       address,
     };
 
-    // If password is provided, hash it before updating
-    if (password) {
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash(password, salt);
-      updateFields.password = hashedPassword;
+    let isPasswordChange = false;
+    let isEmailChange = false;
+
+    if (password && password.trim() !== "") {
+      isPasswordChange = true;
     }
 
-    // Update the user document
+    if (email && email.trim() !== "" && email !== user.email) {
+      isEmailChange = true;
+      updateFields.email = email;
+    }
+
+    // Если пользователь хочет изменить email или пароль, необходима проверка старого пароля
+    if (isPasswordChange || isEmailChange) {
+      if (!oldPassword) {
+        return res
+          .status(400)
+          .json({
+            message: "Old password is required to change email or password.",
+          });
+      }
+
+      const isMatch = await bcrypt.compare(oldPassword, user.password);
+      if (!isMatch) {
+        return res.status(401).json({ message: "Old password is incorrect." });
+      }
+
+      // Если меняется пароль, хэшируем его
+      if (isPasswordChange) {
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+        updateFields.password = hashedPassword;
+      }
+    }
+
+    // Выполняем обновление
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $set: updateFields },
-      { new: true } // `useFindAndModify` is deprecated and not needed here
+      { new: true }
     );
 
-    // If user not found
     if (!updatedUser) {
       return res.status(404).json({ message: "User not found." });
     }
 
-    // Respond with the updated user data
     return res.status(200).json({
       message: "User data updated successfully.",
       user: updatedUser,
